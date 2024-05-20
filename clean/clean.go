@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -51,6 +52,7 @@ func CheckImageNotInUse(all []*ImageInfo, detail types.ImageDetail) bool {
 	for _, image := range all {
 		_, deetsDigest, _ := strings.Cut(*detail.ImageDigest, ":")
 		if deetsDigest == image.Digest {
+
 			return false
 		}
 	}
@@ -225,18 +227,36 @@ func GetUnique(all []*ImageInfo) []*ImageInfo {
 	return unique
 }
 
-func CleanRepos(untaggedOnly bool, keepLastCount int, profile string, region string, dryRun bool, verbose bool) bool {
-	arnmap := map[string]string{
-		"development": "arn:aws:iam::722014088219:role/devops-read-only",
-		"production":  "arn:aws:iam::667347940230:role/devops-read-only",
+func CleanRepos(untaggedOnly bool, keepLastCount int, arn string, region string, dryRun bool, verbose bool) bool {
+	// arnmap := map[string]string{
+	// 	"development": "arn:aws:iam::722014088219:role/devops-read-only",
+	// 	"production":  "arn:aws:iam::667347940230:role/devops-read-only",
+	//}
+
+	if arn == "arn:aws:iam::722014088219:role/devops-read-only" {
+		if os.Getenv("AWS_ROLE_ARN") != "" {
+			arn = os.Getenv("AWS_ROLE_ARN")
+		}
 	}
-	log.Info().Bool("untaggedOnly", untaggedOnly).Bool("dryRun", dryRun).Int("keepLastCount", keepLastCount).Str("profile", profile).Bool("verbose", verbose).Str("region", region).Msg("starting ecr-cleanup process")
+	fmt.Printf("arn: %v\n", arn)
+	match, err := regexp.MatchString("arn:aws:iam::\\d.+:\\w+\\/.+", arn)
+	if err != nil {
+		log.Err(err).Msg("failed to match ARN")
+		os.Exit(1)
+	}
+	if !match {
+		log.Error().Err(err).Msg("ARN does not match pattern")
+		os.Exit(1)
+	}
+	log.Info().Bool("untaggedOnly", untaggedOnly).Bool("dryRun", dryRun).Int("keepLastCount", keepLastCount).Str("arnRole", strings.Split(arn, ":")[len(strings.Split(arn, ":"))-1]).Bool("verbose", verbose).Str("region", region).Msg("starting ecr-cleanup process")
 	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to load SDK config")
 	}
 	stsSvc := sts.NewFromConfig(cfg)
-	stsCred := stscreds.NewAssumeRoleProvider(stsSvc, arnmap[profile])
+
+	// arn := arnmap[profile]
+	stsCred := stscreds.NewAssumeRoleProvider(stsSvc, arn)
 
 	cfg.Credentials = aws.NewCredentialsCache(stsCred)
 	client := ecr.NewFromConfig(cfg)
